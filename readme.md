@@ -1,6 +1,8 @@
 This is a fork of [groinge/sd-webui-untitledmerger](https://github.com/groinge/sd-webui-untitledmerger) which I decided to maintain while the original maintainer is unavailable for personal reasons.
 Within paretheses below is my comments as I want to maintain the original repos README.md as much as possible.
 
+At some stage we'll look into WHY this doesn't work with forge, but right now it's just forked for forking  sakes.
+
 Capable of reusing calculations from recent merges to greatly improve merge times
 
 Note:
