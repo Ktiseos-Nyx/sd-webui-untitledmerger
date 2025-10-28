@@ -13,7 +13,11 @@ from tqdm import tqdm
 from copy import copy,deepcopy
 from modules import devices,shared,script_loading,paths,paths_internal,sd_models,sd_unet,sd_hijack
 
-networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
+# Try Forge path first, fallback to old A1111 path for backwards compatibility
+try:
+    networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'sd_forge_lora','networks.py'))
+except (FileNotFoundError, OSError):
+    networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
 
 class MergeInterruptedError(Exception):
     def __init__(self,*args):
@@ -36,12 +40,17 @@ SKIP_KEYS = [
 
 VALUE_NAMES = ('alpha','beta','gamma','delta')
 
+mergemode_selection = {}
+for mergemode_obj in calcmodes.MERGEMODES_LIST:
+    mergemode_selection.update({mergemode_obj.name: mergemode_obj})
+
 calcmode_selection = {}
 for calcmode_obj in calcmodes.CALCMODES_LIST:
     calcmode_selection.update({calcmode_obj.name: calcmode_obj})
 
 
-def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,model_d,slider_a,slider_b,slider_c,slider_d,editor,discard,clude,clude_mode,seed,enable_sliders,active_sliders,*custom_sliders):
+def parse_arguments(progress,mergemode_name,calcmode_name,model_a,model_b,model_c,model_d,slider_a,slider_b,slider_c,slider_d,editor,discard,clude,clude_mode,seed,enable_sliders,active_sliders,*custom_sliders):
+    mergemode = mergemode_selection[mergemode_name]
     calcmode = calcmode_selection[calcmode_name]
     parsed_targets = {}
 
@@ -115,7 +124,7 @@ def parse_arguments(progress,calcmode_name,model_a,model_b,model_c,model_d,slide
             desired_keys = list(filter(lambda x: re.search(clude_regex,x),keys))
 
     assigned_keys = assign_weights_to_keys(parsed_targets,desired_keys)
-    return calcmode, keys, assigned_keys, discard_keys, checkpoints
+    return mergemode, calcmode, keys, assigned_keys, discard_keys, checkpoints
 
 
 def assign_weights_to_keys(targets,keys,already_assigned=None) -> dict:
@@ -146,7 +155,7 @@ def assign_weights_to_keys(targets,keys,already_assigned=None) -> dict:
     return assigned_keys
 
 
-def create_tasks(progress, calcmode, keys, assigned_keys, discard_keys,checkpoints):
+def create_tasks(progress, mergemode, calcmode, keys, assigned_keys, discard_keys,checkpoints):
     tasks = []
     n = 0
     for key in keys:
@@ -155,7 +164,11 @@ def create_tasks(progress, calcmode, keys, assigned_keys, discard_keys,checkpoin
             tasks.append(oper.LoadTensor(key,cmn.primary))
         elif key in assigned_keys.keys():
             n += 1
-            tasks.append(calcmode.create_recipe(key,*checkpoints,**assigned_keys[key]))
+            # Create base recipe from merge mode
+            base_recipe = mergemode.create_recipe(key,*checkpoints,**assigned_keys[key])
+            # Let calc mode modify it
+            final_recipe = calcmode.modify_recipe(base_recipe, key, *checkpoints, **assigned_keys[key])
+            tasks.append(final_recipe)
         else:
             tasks.append(oper.LoadTensor(key,cmn.primary))
 
@@ -171,9 +184,9 @@ def prepare_merge(progress,save_name,save_settings,finetune,*merge_args):
     cmn.interrupted = True
     cmn.stop = False
 
-    calcmode, keys, assigned_keys, discard_keys, checkpoints = parse_arguments(progress,*merge_args)
-    
-    tasks = create_tasks(progress, calcmode, keys, assigned_keys, discard_keys, checkpoints)
+    mergemode, calcmode, keys, assigned_keys, discard_keys, checkpoints = parse_arguments(progress,*merge_args)
+
+    tasks = create_tasks(progress, mergemode, calcmode, keys, assigned_keys, discard_keys, checkpoints)
 
     sd_unet.apply_unet("None")
     sd_hijack.model_hijack.undo_hijack(shared.sd_model)
@@ -181,7 +194,7 @@ def prepare_merge(progress,save_name,save_settings,finetune,*merge_args):
     #Merge process begins here:
     state_dict = merge(progress,tasks,checkpoints,finetune,timer)
 
-    merge_name = mutil.create_name(checkpoints,calcmode.name,0)
+    merge_name = mutil.create_name(checkpoints,f"{mergemode.name}+{calcmode.name}",0)
 
     checkpoint_info = deepcopy(sd_models.get_closet_checkpoint_match(os.path.basename(cmn.primary)))
     checkpoint_info.short_title = hash(cmn.last_merge_tasks)
@@ -204,13 +217,15 @@ def merge(progress,tasks,checkpoints,finetune,timer) -> dict:
     progress('### Starting merge ###')
     cmn.checkpoints_types = {checkpoint:mutil.id_checkpoint(checkpoint)[0] for checkpoint in checkpoints}
     tasks_copy = copy(tasks)
-    if shared.sd_model and shared.sd_model.device != 'cpu':
+    # Forge uses FakeInitialModel which doesn't have .device attribute - check safely
+    if shared.sd_model and hasattr(shared.sd_model, 'device') and shared.sd_model.device != 'cpu':
         sd_models.unload_model_weights(shared.sd_model)
 
     state_dict = {}
 
     #Reuse merged tensors from the last merge's loaded model, if availible
-    if shared.sd_model and shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
+    # Forge compatibility - check if model has sd_checkpoint_info before accessing
+    if shared.sd_model and hasattr(shared.sd_model, 'sd_checkpoint_info') and shared.sd_model.sd_checkpoint_info.short_title == hash(cmn.last_merge_tasks):
         state_dict,tasks = get_tensors_from_loaded_model(state_dict,tasks)
         if len(state_dict) > 0:
             progress('Reusing from loaded model',v=len(state_dict))
@@ -218,11 +233,17 @@ def merge(progress,tasks,checkpoints,finetune,timer) -> dict:
     is_sdxl = any([type in cmn.checkpoints_types.values() for type in ['SDXL','SDXL-refiner']])
     if ('SDXL' in cmn.opts['trash_model'] and is_sdxl) or cmn.opts['trash_model'] == 'Enable':
         progress('Unloading webui models...')
-        while len(sd_models.model_data.loaded_sd_models) > 0:
-            model = sd_models.model_data.loaded_sd_models.pop()
-            sd_models.send_model_to_trash(model)
-        sd_models.model_data.sd_model = None
-        shared.sd_model = None
+        # Forge compatibility - loaded_sd_models doesn't exist in Forge
+        if hasattr(sd_models.model_data, 'loaded_sd_models'):
+            while len(sd_models.model_data.loaded_sd_models) > 0:
+                model = sd_models.model_data.loaded_sd_models.pop()
+                sd_models.send_model_to_trash(model)
+            sd_models.model_data.sd_model = None
+            shared.sd_model = None
+        else:
+            # Forge doesn't have proper model unloading - just clear references
+            sd_models.model_data.sd_model = None
+            shared.sd_model = None
     devices.torch_gc()
 
     timer.record('Prepare merge')

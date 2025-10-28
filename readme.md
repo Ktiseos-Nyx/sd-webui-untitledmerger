@@ -1,26 +1,169 @@
-This is a fork of [groinge/sd-webui-untitledmerger](https://github.com/groinge/sd-webui-untitledmerger) which I decided to maintain while the original maintainer is unavailable for personal reasons.
-Within paretheses below is my comments as I want to maintain the original repos README.md as much as possible.
+# Untitled Merger - Advanced Model Merging for Stable Diffusion
 
-At some stage we'll look into WHY this doesn't work with forge, but right now it's just forked for forking  sakes.
+A powerful Stable Diffusion checkpoint merging extension with **15 merge algorithms**, **LoRA support**, and **intelligent caching**.
 
-Capable of reusing calculations from recent merges to greatly improve merge times
+## 🎉 Now Works on Forge!
 
-Note:
-- Only supports safetensors.
-- Developed for webui 1.7.0 dev branch(But has been confirmed to work on 1.9.3 after I removed the image generation section temporarily)
-- I'm currently focusing on 1.5 merging. XL merging generally works but there may be issues. (I have had no direct issues with SDXL so far)
+This is an actively maintained fork of [groinge/sd-webui-untitledmerger](https://github.com/groinge/sd-webui-untitledmerger) with major updates and Forge compatibility!
 
-Inspired by and uses snippets from: https://github.com/hako-mikan/sd-webui-supermerger 🙏🙏🙏
+### ✨ What's New in This Fork
 
-Power-Up merge from:
-- https://github.com/martyn/safetensors-merge-supermario
-- https://github.com/yule-BUAA/MergeLM
+- ✅ **Forge Compatibility** - Works on both SD WebUI Forge AND A1111!
+- ✅ **6 New Merge Modes** - Added Triple Sum, Quad Sum, Multiply Difference, Sum Twice, Self, and Tensor modes
+- ✅ **LoRA Merging** - Merge LoRAs to checkpoints or combine multiple LoRAs
+- ✅ **Bug Fixes** - Fixed DARE (Power-up) division by zero crash
+- ✅ **4-Model Support** - Quad Sum mode finally uses all 4 model slots!
 
-To do:
-- XYZ plotting
-- State saving
-- History
-(- Add back improved image generator)
-(- Improve key matching and add per key weight settings menu)
-(- Redo block weights to match format used by Supermerger to allow easy conversion of presets)
-(- Merge history logger for basic information)
+---
+
+## 🚀 Features
+
+### Advanced Merge Algorithms (15 Total!)
+
+**Basic Modes:**
+- **Weight-Sum** - Classic linear interpolation between two models
+- **Self** - Multiply model weights by a scalar value
+
+**Multi-Model Modes:**
+- **Triple Sum** - Weighted blend of 3 models
+- **Quad Sum** - Weighted blend of 4 models (NEW!)
+- **Sum Twice** - Hierarchical two-stage merging
+
+**Difference-Based Modes:**
+- **Add Difference** - Add weighted difference: `A + (B-C) × α`
+- **Multiply Difference** - Multiplicative difference: `A × ((B-C) × α + 1)` (NEW!)
+- **Train Difference** - Treat difference as fine-tuning relative to base model
+
+**Advanced Interpolation:**
+- **Comparative Interp** - Adaptive interpolation based on value differences
+- **Enhanced Manual Interp** - Manual threshold control for interpolation
+- **Enhanced Auto Interp** - Automatic threshold calculation
+
+**Research-Based Methods:**
+- **Power-up (DARE)** - Drop And REscale from research papers (FIXED!)
+- **Extract** - Merge common/uncommon features between models
+- **Add Dissimilarities** - Add dissimilar features to base model
+
+**Experimental:**
+- **Tensor** - Swap entire tensors by probability instead of blending (NEW!)
+
+### LoRA Support
+
+- **Merge LoRA to Checkpoint** - Permanently bake a LoRA into a checkpoint with adjustable strength
+- **Merge Multiple LoRAs** - Combine 2-3 LoRA files with custom weights
+
+### Performance Features
+
+- **Calculation Caching** - Reuses intermediate calculations to speed up subsequent merges
+- **Multi-threading** - Configurable worker threads for parallel operations
+- **Memory Efficient** - Smart caching with configurable size limits (0-16GB)
+
+---
+
+## 📋 Requirements
+
+- Stable Diffusion WebUI (A1111) **OR** Stable Diffusion WebUI Forge
+- Only supports `.safetensors` format checkpoints
+- Python 3.10+ with torch, safetensors, scipy (usually pre-installed)
+
+---
+
+## 🎯 Compatibility
+
+| Platform | Status | Tested Version |
+|----------|--------|----------------|
+| SD WebUI Forge | ✅ Working | Latest (2024) |
+| SD WebUI A1111 | ✅ Working | 1.7.0 - 1.9.3+ |
+| SD 1.5 Models | ✅ Fully Supported | All variants |
+| SDXL Models | ✅ Generally Works | May have edge cases |
+
+---
+
+## 🙏 Credits & Inspiration
+
+This extension builds upon the excellent work of:
+
+- **Original Extension:** [groinge/sd-webui-untitledmerger](https://github.com/groinge/sd-webui-untitledmerger)
+- **Supermerger:** [hako-mikan/sd-webui-supermerger](https://github.com/hako-mikan/sd-webui-supermerger) - UI patterns and merge algorithms
+- **DARE/Power-up:** [martyn/safetensors-merge-supermario](https://github.com/martyn/safetensors-merge-supermario) - Research implementation
+- **MergeLM:** [yule-BUAA/MergeLM](https://github.com/yule-BUAA/MergeLM) - Theoretical foundations
+
+---
+
+## 🛠️ Installation
+
+1. Navigate to your WebUI extensions folder:
+   ```bash
+   cd stable-diffusion-webui/extensions/
+   # OR for Forge:
+   cd stable-diffusion-webui-forge/extensions/
+   ```
+
+2. Clone this repository:
+   ```bash
+   git clone https://github.com/YOUR-USERNAME/sd-webui-untitledmerger.git
+   ```
+
+3. Restart your WebUI
+
+4. Look for the **"Untitled merger"** tab!
+
+---
+
+## 📖 Usage
+
+### Basic Checkpoint Merging
+
+1. Select your merge mode from the dropdown
+2. Choose base models (2-4 depending on mode)
+3. Adjust sliders for merge weights
+4. Configure save options (fp16/bf16, autosave, etc.)
+5. Click **Merge**!
+
+### Advanced Features
+
+- **Custom Sliders** - Per-block weight control for fine-grained merging
+- **Include/Exclude Filters** - Regex-based layer targeting
+- **Supermerger Adjust** - Fine-tune detail, contrast, brightness, and color
+- **YAML Weight Editor** - Batch operations via configuration files
+
+### LoRA Merging
+
+- **LoRA → Checkpoint:** Bake a LoRA into a model permanently
+- **LoRA → LoRA:** Combine multiple LoRAs with custom ratios
+
+---
+
+## 🐛 Known Issues & Limitations
+
+- Image generation tab intentionally removed (not needed for merging workflow)
+- LoRA merging uses heuristic key matching (may need adjustment for exotic LoRAs)
+- SDXL merging works but less tested than SD 1.5
+
+---
+
+## 📝 To-Do List
+
+- [ ] XYZ plotting for parameter exploration
+- [ ] State saving and merge history
+- [ ] Improve LoRA key matching for better compatibility
+- [ ] Block weight presets compatible with Supermerger format
+- [ ] Merge history logger
+
+---
+
+## 📜 License
+
+Same as original - check [LICENSE](LICENSE) file for details.
+
+---
+
+## 💬 Support
+
+For issues, feature requests, or questions:
+- Open an issue on GitHub
+- Check existing issues for solutions
+
+---
+
+**Happy Merging!** 🎨✨

@@ -12,6 +12,7 @@ from modules.ui_common import create_output_panel,plaintext_to_html, create_refr
 # from modules.ui import create_sampler_and_steps_selection
 from scripts.untitled import merger,misc_util
 from scripts.untitled.operators import weights_cache
+from scripts.untitled import lora_merge
 import scripts.untitled.common as cmn
 
 extension_path = scripts.basedir()
@@ -142,17 +143,23 @@ def on_ui_tabs():
 
                     #### MODE SELECTION
                     with gr.Row():
-                        mode_selector = gr.Radio(label='Merge mode:',choices=list(merger.calcmode_selection.keys()),value=list(merger.calcmode_selection.keys())[0],scale=3)
-            
-            
+                        merge_mode_selector = gr.Radio(label='Merge Mode (formula structure):',choices=list(merger.mergemode_selection.keys()),value=list(merger.mergemode_selection.keys())[0],scale=3)
+                    merge_mode_desc = gr.Textbox(label="Merge Mode Description", value=merger.mergemode_selection[list(merger.mergemode_selection.keys())[0]].description, interactive=False, lines=2)
+
+                    with gr.Row():
+                        calc_mode_selector = gr.Radio(label='Calculation Mode (how to execute):',choices=list(merger.calcmode_selection.keys()),value=list(merger.calcmode_selection.keys())[0],scale=3)
+                    calc_mode_desc = gr.Textbox(label="Calculation Mode Description", value=merger.calcmode_selection[list(merger.calcmode_selection.keys())[0]].description, interactive=False, lines=2)
+
+
                     ##### MAIN SLIDERS
                     with gr.Row(equal_height=True):
                         alpha = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_a [α] (alpha)",info='model_a - model_b',value=0.5,elem_classes=['main_sliders'])
                         beta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_b [β] (beta)",info='-',value=0.5,elem_classes=['main_sliders'])
                         gamma = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_c [γ] (gamma)",info='-',value=0.25,elem_classes=['main_sliders'])
                         delta = gr.Slider(minimum=-1,step=0.01,maximum=2,label="slider_d [δ] (delta)",info='-',value=0.25,elem_classes=['main_sliders'])
-            
-                    mode_selector.change(fn=calcmode_changed, inputs=[mode_selector], outputs=[mode_selector,alpha,beta,gamma,delta],show_progress='hidden')
+
+                    merge_mode_selector.change(fn=mode_changed, inputs=[merge_mode_selector, calc_mode_selector], outputs=[merge_mode_desc,calc_mode_desc,alpha,beta,gamma,delta],show_progress='hidden')
+                    calc_mode_selector.change(fn=mode_changed, inputs=[merge_mode_selector, calc_mode_selector], outputs=[merge_mode_desc,calc_mode_desc,alpha,beta,gamma,delta],show_progress='hidden')
             
             
                     ### SAVING
@@ -414,7 +421,8 @@ def on_ui_tabs():
             
                 merge_args = [
                     finetune,
-                    mode_selector,
+                    merge_mode_selector,
+                    calc_mode_selector,
                     model_a,
                     model_b,
                     model_c,
@@ -479,7 +487,70 @@ def on_ui_tabs():
                 #                 inputs=gen_args,
                 #                 outputs=[output_gallery,infotext,output_html_log])
         with gr.Tab("LoRA", elem_id="tab_lora"):
-            dummy_component = gr.Textbox(visible=False,interactive=True)
+            gr.Markdown("## ⚠️ UNDER CONSTRUCTION\nLoRA merging is functional but experimental. Needs real-world testing and refinement. Use at your own risk!")
+            lora_status = gr.Textbox(max_lines=4,lines=4,show_label=False,info="",interactive=False,render=False)
+
+            with gr.Accordion("Merge LoRA(s) to Checkpoint", open=True):
+                gr.Markdown("Bake one or multiple LoRAs into a checkpoint permanently")
+
+                with gr.Row():
+                    lora_to_ckpt_checkpoint = gr.Dropdown(get_checkpoints_list('Alphabetical'), label="Base Checkpoint", scale=4)
+                    lora_refresh_ckpt = create_refresh_button(lora_to_ckpt_checkpoint, lambda: None, lambda: {'choices': get_checkpoints_list('Alphabetical')}, 'refresh_lora_ckpt')
+
+                lora_ckpt_info = gr.HTML(plaintext_to_html('None | None',classname='untitled_sd_version'))
+
+                with gr.Row():
+                    lora_checkbox_group = gr.CheckboxGroup(label="Select LoRAs to merge (with dtype info)", choices=[], type="value", interactive=True)
+                    lora_refresh_list = create_refresh_button(lora_checkbox_group, lambda: None, lambda: {'choices': get_lora_list()}, 'refresh_lora_list')
+
+                with gr.Row():
+                    lora_to_ckpt_strength = gr.Slider(minimum=-2, maximum=2, step=0.01, value=1.0, label="Global LoRA Strength", info="Apply this strength to all checked LoRAs (1.0 = normal)")
+                    lora_to_ckpt_name = gr.Textbox(label="Output Name", placeholder="model_with_loras", info="Name for merged checkpoint")
+
+                lora_to_ckpt_button = gr.Button("Merge LoRA(s) to Checkpoint", variant="primary")
+
+            with gr.Accordion("Merge Multiple LoRAs", open=False):
+                gr.Markdown("Combine 2-3 LoRA files into a single LoRA")
+                with gr.Column():
+                    with gr.Row():
+                        lora_merge_lora1 = gr.Textbox(label="LoRA 1 Path", placeholder="/path/to/lora1.safetensors", scale=3)
+                        lora_merge_weight1 = gr.Slider(minimum=0, maximum=2, step=0.01, value=0.5, label="Weight", scale=1)
+
+                    with gr.Row():
+                        lora_merge_lora2 = gr.Textbox(label="LoRA 2 Path", placeholder="/path/to/lora2.safetensors", scale=3)
+                        lora_merge_weight2 = gr.Slider(minimum=0, maximum=2, step=0.01, value=0.5, label="Weight", scale=1)
+
+                    with gr.Row():
+                        lora_merge_lora3 = gr.Textbox(label="LoRA 3 Path (optional)", placeholder="/path/to/lora3.safetensors", scale=3)
+                        lora_merge_weight3 = gr.Slider(minimum=0, maximum=2, step=0.01, value=0.0, label="Weight", scale=1)
+
+                gr.Markdown("*Weights will be normalized to sum to 1.0*")
+                with gr.Row():
+                    lora_merge_name = gr.Textbox(label="Output Name", placeholder="merged_lora", info="Name for merged LoRA file")
+                    lora_merge_button = gr.Button("Merge LoRAs", variant="primary")
+
+            lora_status.render()
+
+            # Wire up dtype detection
+            lora_to_ckpt_checkpoint.change(fn=checkpoint_changed, inputs=lora_to_ckpt_checkpoint, outputs=lora_ckpt_info)
+
+            # Wire up the LoRA merge buttons
+            lora_to_ckpt_button.click(
+                fn=merge_loras_to_checkpoint_ui,
+                inputs=[lora_to_ckpt_checkpoint, lora_checkbox_group, lora_to_ckpt_name, lora_to_ckpt_strength],
+                outputs=lora_status
+            )
+
+            lora_merge_button.click(
+                fn=merge_loras_ui,
+                inputs=[
+                    lora_merge_lora1, lora_merge_weight1,
+                    lora_merge_lora2, lora_merge_weight2,
+                    lora_merge_lora3, lora_merge_weight3,
+                    lora_merge_name
+                ],
+                outputs=lora_status
+            )
 
 
     return [(cmn.blocks, "Untitled merger", "untitled_merger")]
@@ -525,38 +596,63 @@ def checkpoint_changed(name):
     return plaintext_to_html(f"{sdversion} | {str(dtype).split('.')[1]}",classname='untitled_sd_version')
 
 
-def calcmode_changed(calcmode_name):
+def lora_file_changed(lora_path):
+    """Detect dtype of a LoRA file"""
+    try:
+        if not lora_path or not os.path.exists(lora_path):
+            return plaintext_to_html('Invalid path',classname='untitled_sd_version')
+
+        with safetensors.torch.safe_open(lora_path, framework='pt', device='cpu') as f:
+            keys = list(f.keys())
+            if len(keys) > 0:
+                # Get dtype from first tensor
+                tensor = f.get_tensor(keys[0])
+                dtype_str = str(tensor.dtype).split('.')[1]
+                num_keys = len(keys)
+                return plaintext_to_html(f'LoRA | {dtype_str} | {num_keys} keys',classname='untitled_sd_version')
+            else:
+                return plaintext_to_html('LoRA | empty file',classname='untitled_sd_version')
+    except Exception as e:
+        return plaintext_to_html(f'Error: {str(e)}',classname='untitled_sd_version')
+
+
+def mode_changed(mergemode_name, calcmode_name):
+    """Handle changes to merge mode or calc mode selections"""
+    mergemode = merger.mergemode_selection[mergemode_name]
     calcmode = merger.calcmode_selection[calcmode_name]
 
-    slider_a_update = gr.update(
-        minimum=calcmode.slid_a_config[0],
-        maximum=calcmode.slid_a_config[1],
-        step=calcmode.slid_a_config[2],
-        info=calcmode.slid_a_info
-    )
+    # Use calc mode slider config if defined, otherwise use merge mode config
+    # CalcModes like 'extract' have their own slider configs that override the merge mode
+    if hasattr(calcmode, 'slid_a_config') and calcmode.slid_a_config != (-1, 2, 0.01):
+        slider_a_config = calcmode.slid_a_config
+        slider_a_info = calcmode.slid_a_info
+        slider_b_config = calcmode.slid_b_config
+        slider_b_info = calcmode.slid_b_info
+        slider_c_config = calcmode.slid_c_config
+        slider_c_info = calcmode.slid_c_info
+        slider_d_config = calcmode.slid_d_config
+        slider_d_info = calcmode.slid_d_info
+    else:
+        # Use merge mode's slider config
+        slider_a_config = mergemode.slid_a_config
+        slider_a_info = mergemode.slid_a_info
+        slider_b_config = mergemode.slid_b_config
+        slider_b_info = mergemode.slid_b_info
+        slider_c_config = mergemode.slid_c_config
+        slider_c_info = mergemode.slid_c_info
+        slider_d_config = mergemode.slid_d_config
+        slider_d_info = mergemode.slid_d_info
 
-    slider_b_update = gr.update(
-        minimum=calcmode.slid_b_config[0],
-        maximum=calcmode.slid_b_config[1],
-        step=calcmode.slid_b_config[2],
-        info=calcmode.slid_b_info
-    )
+    slider_a_update = gr.update(minimum=slider_a_config[0], maximum=slider_a_config[1], step=slider_a_config[2], info=slider_a_info)
+    slider_b_update = gr.update(minimum=slider_b_config[0], maximum=slider_b_config[1], step=slider_b_config[2], info=slider_b_info)
+    slider_c_update = gr.update(minimum=slider_c_config[0], maximum=slider_c_config[1], step=slider_c_config[2], info=slider_c_info)
+    slider_d_update = gr.update(minimum=slider_d_config[0], maximum=slider_d_config[1], step=slider_d_config[2], info=slider_d_info)
 
-    slider_c_update = gr.update(
-        minimum=calcmode.slid_c_config[0],
-        maximum=calcmode.slid_c_config[1],
-        step=calcmode.slid_c_config[2],
-        info=calcmode.slid_c_info
-    )
+    # Return updates for description textboxes and all sliders
+    merge_desc_update = gr.update(value=mergemode.description)
+    calc_desc_update = gr.update(value=calcmode.description)
 
-    slider_d_update = gr.update(
-        minimum=calcmode.slid_d_config[0],
-        maximum=calcmode.slid_d_config[1],
-        step=calcmode.slid_d_config[2],
-        info=calcmode.slid_d_info
-    )
-
-    return gr.update(info = calcmode.description),slider_a_update,slider_b_update,slider_c_update,slider_d_update
+    return merge_desc_update, calc_desc_update, slider_a_update, slider_b_update, slider_c_update, slider_d_update
 
 
 def get_checkpoints_list(sort):
@@ -565,6 +661,42 @@ def get_checkpoints_list(sort):
         sort_func = lambda x: os.path.getctime(sd_models.get_closet_checkpoint_match(x).filename)
         checkpoints_list.sort(key=sort_func,reverse=True)
     return checkpoints_list
+
+
+def get_lora_list():
+    """Scan for LoRA files and return list with dtype labels"""
+    lora_choices = []
+
+    # Common LoRA locations
+    possible_dirs = [
+        os.path.join(paths.models_path, 'Lora'),
+        os.path.join(paths.models_path, 'lora'),
+    ]
+
+    for lora_dir in possible_dirs:
+        if os.path.exists(lora_dir):
+            for root, dirs, files in os.walk(lora_dir):
+                for file in files:
+                    if file.endswith('.safetensors'):
+                        full_path = os.path.join(root, file)
+                        # Get dtype
+                        try:
+                            with safetensors.torch.safe_open(full_path, framework='pt', device='cpu') as f:
+                                keys = list(f.keys())
+                                if len(keys) > 0:
+                                    tensor = f.get_tensor(keys[0])
+                                    dtype_str = str(tensor.dtype).split('.')[1]
+                                    # Format: ("display [dtype]", "full_path")
+                                    display_name = f"{file} [{dtype_str}]"
+                                    lora_choices.append((display_name, full_path))
+                        except:
+                            # If we can't read it, still add it without dtype
+                            lora_choices.append((file, full_path))
+
+    # Sort alphabetically by display name
+    lora_choices.sort(key=lambda x: x[0].lower())
+
+    return lora_choices
 
 
 def refresh_models(sort):
@@ -603,3 +735,157 @@ def get_slider_presets():
 def load_slider_preset(name):
     preset = loaded_slider_presets[name]
     return [gr.update(value=x) for x in preset]
+
+
+### LORA MERGE FUNCTIONS ###
+
+def merge_loras_to_checkpoint_ui(checkpoint_name, lora_paths, output_name, strength):
+    """Merge multiple LoRAs into a checkpoint sequentially"""
+    progress = Progress()
+
+    try:
+        if not checkpoint_name:
+            return "Error: Please select a base checkpoint"
+        if not lora_paths or len(lora_paths) == 0:
+            return "Error: Please select at least one LoRA"
+        if not output_name:
+            return "Error: Please provide an output name"
+
+        # Get checkpoint path
+        checkpoint_info = sd_models.get_closet_checkpoint_match(checkpoint_name)
+        if not checkpoint_info:
+            return f"Error: Could not find checkpoint {checkpoint_name}"
+
+        checkpoint_path = checkpoint_info.filename
+
+        # Determine output path
+        output_dir = os.path.dirname(checkpoint_path)
+        output_path = os.path.join(output_dir, f"{output_name}.safetensors")
+
+        progress(f"Merging {len(lora_paths)} LoRA(s) to checkpoint...")
+
+        # Load checkpoint once
+        with safetensors.torch.safe_open(checkpoint_path, framework='pt', device='cpu') as checkpoint_file:
+            checkpoint_keys = list(checkpoint_file.keys())
+            checkpoint_dict = {k: checkpoint_file.get_tensor(k) for k in checkpoint_keys}
+
+        progress(f"Loaded base checkpoint: {checkpoint_name}")
+
+        # Apply each LoRA sequentially
+        for idx, lora_path in enumerate(lora_paths):
+            progress(f"Applying LoRA {idx+1}/{len(lora_paths)}: {os.path.basename(lora_path)}")
+
+            # Load LoRA
+            with safetensors.torch.safe_open(lora_path, framework='pt', device='cpu') as lora_file:
+                lora_keys = list(lora_file.keys())
+                lora_dict = {k: lora_file.get_tensor(k) for k in lora_keys}
+
+            # Group LoRA keys
+            lora_groups = {}
+            for lora_key in lora_keys:
+                base_key, lora_type = lora_merge.parse_lora_key(lora_key)
+                if base_key is None:
+                    continue
+
+                if base_key not in lora_groups:
+                    lora_groups[base_key] = {}
+                lora_groups[base_key][lora_type] = lora_key
+
+            merged_count = 0
+            # Apply LoRA to checkpoint dict
+            for base_key, lora_parts in lora_groups.items():
+                if 'up' not in lora_parts or 'down' not in lora_parts:
+                    continue
+
+                # Find matching checkpoint key
+                checkpoint_key = None
+                for ck_key in checkpoint_keys:
+                    if base_key in ck_key or ck_key in base_key:
+                        checkpoint_key = ck_key
+                        break
+
+                if checkpoint_key is None or checkpoint_key not in checkpoint_dict:
+                    continue
+
+                try:
+                    lora_up = lora_dict[lora_parts['up']]
+                    lora_down = lora_dict[lora_parts['down']]
+
+                    if 'alpha' in lora_parts:
+                        alpha = lora_dict[lora_parts['alpha']].item()
+                    else:
+                        alpha = float(lora_down.shape[0])
+
+                    rank = lora_down.shape[0]
+                    lora_delta = (lora_up @ lora_down) * (alpha / rank) * strength
+
+                    original_weight = checkpoint_dict[checkpoint_key]
+                    if original_weight.shape == lora_delta.shape:
+                        checkpoint_dict[checkpoint_key] = original_weight + lora_delta
+                        merged_count += 1
+
+                except Exception:
+                    continue
+
+            progress(f"  Merged {merged_count} layers from LoRA {idx+1}")
+
+        progress(f"Saving merged checkpoint to: {output_path}")
+        safetensors.torch.save_file(checkpoint_dict, output_path)
+
+        # Refresh model list
+        sd_models.list_models()
+
+        progress(f"✓ Successfully merged {len(lora_paths)} LoRA(s) into checkpoint!", popup=True)
+        return progress.get_report()
+
+    except Exception as e:
+        import traceback
+        return f"Error: {str(e)}\n{traceback.format_exc()}"
+
+
+def merge_loras_ui(lora1, weight1, lora2, weight2, lora3, weight3, output_name):
+    progress = Progress()
+
+    try:
+        # Collect LoRA paths and weights
+        lora_paths = []
+        weights = []
+
+        if lora1 and os.path.exists(lora1):
+            lora_paths.append(lora1)
+            weights.append(weight1)
+        if lora2 and os.path.exists(lora2):
+            lora_paths.append(lora2)
+            weights.append(weight2)
+        if lora3 and os.path.exists(lora3):
+            lora_paths.append(lora3)
+            weights.append(weight3)
+
+        if len(lora_paths) < 2:
+            return "Error: Please provide at least 2 valid LoRA paths"
+
+        if not output_name:
+            return "Error: Please provide an output name"
+
+        # Normalize weights to sum to 1
+        total_weight = sum(weights)
+        if total_weight == 0:
+            return "Error: Total weight cannot be zero"
+        weights = [w / total_weight for w in weights]
+
+        # Determine output path (use same dir as first LoRA)
+        output_dir = os.path.dirname(lora_paths[0])
+        output_path = os.path.join(output_dir, f"{output_name}.safetensors")
+
+        # Merge
+        result = lora_merge.merge_loras(
+            lora_paths,
+            output_path,
+            weights=weights,
+            progress=progress
+        )
+
+        return progress.get_report()
+
+    except Exception as e:
+        return f"Error: {str(e)}"

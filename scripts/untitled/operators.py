@@ -92,6 +92,14 @@ class Sub(Operation):
         return a - b
 
 
+class MultiplyTensors(Operation):
+    def __init__(self,*args):
+        super().__init__(*args)
+
+    def oper(self,a,b) -> torch.Tensor:
+        return a * b
+
+
 class Smooth(Operation):
     def __init__(self,*args):
         super().__init__(*args)
@@ -182,9 +190,13 @@ class PowerUp(Operation):
 
         # Apply the mask to the delta to get δ̃^t
         delta_tilde = m * delta
-        
+
         # Scale the masked delta by the dropout rate to get δ̂^t
-        delta_hat = delta_tilde / (1 - self.alpha)
+        # Prevent division by zero when alpha = 1.0
+        if self.alpha >= 1.0:
+            delta_hat = delta_tilde
+        else:
+            delta_hat = delta_tilde / (1 - self.alpha)
         return delta_hat
     
 
@@ -362,6 +374,27 @@ class AutoEnhancedInterpolateDifference(Operation):
 #        return result
 
 
+class TensorExchange(Operation):
+    def __init__(self, key, alpha, seed, *sources):
+        super().__init__(key, *sources)
+        self.alpha = alpha
+        self.seed = seed
+
+    def oper(self, a, b):
+        # Use hash of key + seed to deterministically choose tensor
+        import hashlib
+        hash_input = f"{self.key}{self.seed}".encode()
+        hash_val = int(hashlib.md5(hash_input).hexdigest(), 16)
+        # Normalize hash to 0-1 range
+        choice_val = (hash_val % 10000) / 10000.0
+
+        # If choice_val < alpha, return b, else return a
+        if choice_val < self.alpha:
+            return b
+        else:
+            return a
+
+
 class WeightSumCutoff(Operation):
     def __init__(self,key,alpha, beta, gamma, *sources):
         super().__init__(key,*sources)
@@ -375,7 +408,7 @@ class WeightSumCutoff(Operation):
         diff = (torch.max(delta) - delta) / torch.max(delta)
         diffn = torch.nan_to_num(diff)
 
-        mean = torch.mean(diffn,0,True) 
+        mean = torch.mean(diffn,0,True)
         mask = torch.logical_and(mean < self.beta,self.gamma < mean)
         mul = self.alpha*mask
 

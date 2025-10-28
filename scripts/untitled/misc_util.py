@@ -6,7 +6,11 @@ from modules import sd_models,script_callbacks,shared,sd_unet,sd_hijack,sd_model
 
 import scripts.untitled.common as cmn
 
-networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
+# Try Forge path first, fallback to old A1111 path for backwards compatibility
+try:
+    networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'sd_forge_lora','networks.py'))
+except (FileNotFoundError, OSError):
+    networks = script_loading.load_module(os.path.join(paths.extensions_builtin_dir,'Lora','networks.py'))
 
 
 
@@ -201,12 +205,16 @@ def save_state_dict(state_dict,name,settings,timer=None):
 
 
 def load_merged_state_dict(state_dict,checkpoint_info):
-    config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
-    
+    # Forge compatibility - find_checkpoint_config may not exist
+    config = None
+    if hasattr(sd_models_config, 'find_checkpoint_config'):
+        config = sd_models_config.find_checkpoint_config(state_dict, checkpoint_info)
+
     for key, weight in state_dict.items():
         state_dict[key] = weight.half()
 
-    if shared.sd_model and shared.sd_model.used_config == config:
+    # Try to reuse already loaded model if configs match (optimization)
+    if config and shared.sd_model and hasattr(shared.sd_model, 'used_config') and shared.sd_model.used_config == config:
         print('Loading weights using already loaded model...')
 
         load_timer = Timer()
@@ -220,6 +228,7 @@ def load_merged_state_dict(state_dict,checkpoint_info):
         sd_models.model_data.set_sd_model(shared.sd_model)
         sd_unet.apply_unet()
     else:
+        # Standard model loading (works on both Forge and A1111)
         sd_models.load_model(checkpoint_info=checkpoint_info, already_loaded_state_dict=state_dict)
 
 
